@@ -1,7 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const app = express();
-const port = 3005;
+const port = 3004;
 
 app.use(express.json());
 
@@ -11,7 +11,7 @@ const connectMongo = async () => {
   while (retries > 0) {
     try {
       await mongoose.connect('mongodb://mongodb:27017/cafe');
-      console.log('Customer Service connected to MongoDB');
+      console.log('Inventory Service connected to MongoDB');
       break;
     } catch (error) {
       console.error('MongoDB connection error:', error);
@@ -23,51 +23,47 @@ const connectMongo = async () => {
 };
 connectMongo().catch(console.error);
 
-// Customer Schema
-const customerSchema = new mongoose.Schema({
+// Menu Item Schema
+const menuItemSchema = new mongoose.Schema({
   id: { type: Number, required: true, unique: true },
   name: String,
-  email: String,
-  loyaltyPoints: { type: Number, default: 0 },
+  price: Number,
+  stock: Number,
 });
 
-const Customer = mongoose.model('Customer', customerSchema);
+const MenuItem = mongoose.model('MenuItem', menuItemSchema);
 
-app.post('/customers', async (req, res) => {
-  const { name, email } = req.body;
-  const customerCount = await Customer.countDocuments();
-  const customer = new Customer({ id: customerCount + 1, name, email });
-  await customer.save();
-  res.status(201).json(customer);
+app.get('/inventory', async (req, res) => {
+  const items = await MenuItem.find();
+  res.json(items.map(i => ({ id: i.id, name: i.name, stock: i.stock })));
 });
 
-app.get('/customers/:id', async (req, res) => {
-  const customer = await Customer.findOne({ id: parseInt(req.params.id) });
-  if (!customer) return res.status(404).json({ error: 'Customer not found' });
-  res.json(customer);
-});
-
-app.post('/customers/update-points', async (req, res) => {
-  const { customerId, points } = req.body;
-  if (!customerId || points == null) {
-    return res.status(400).json({ error: 'Customer ID and points required' });
+app.post('/inventory/update', async (req, res) => {
+  const { items } = req.body; // items: [{ menuItemId, quantity }]
+  if (!items || !Array.isArray(items)) {
+    return res.status(400).json({ error: 'Invalid items' });
   }
 
   try {
-    const customer = await Customer.findOne({ id: customerId });
-    if (!customer) {
-      return res.status(404).json({ error: 'Customer not found' });
+    for (const item of items) {
+      const menuItem = await MenuItem.findOne({ id: item.menuItemId });
+      if (!menuItem) {
+        return res.status(400).json({ error: `Menu item ${item.menuItemId} not found` });
+      }
+      if (menuItem.stock < item.quantity) {
+        return res.status(400).json({ error: `Insufficient stock for ${menuItem.name}` });
+      }
+      menuItem.stock -= item.quantity;
+      await menuItem.save();
+      console.log(`Updated stock for ${menuItem.name}: ${menuItem.stock}`);
     }
-    customer.loyaltyPoints += points;
-    await customer.save();
-    console.log(`Updated loyalty points for customer ${customer.id}: ${customer.loyaltyPoints}`);
-    res.status(200).json({ message: 'Loyalty points updated' });
+    res.status(200).json({ message: 'Inventory updated' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Failed to update loyalty points' });
+    res.status(500).json({ error: 'Failed to update inventory' });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Customer Service running on port ${port}`);
+  console.log(`Inventory Service running on port ${port}`);
 });
